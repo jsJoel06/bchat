@@ -1,67 +1,62 @@
+// server.js
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
-const { conectarDB, Mensaje } = require("./db");
 
 const app = express();
-
-app.use(cors({
-  origin: ["http://localhost:5173", "https://tu-dominio-frontend.vercel.app"],
-  methods: ["GET", "POST"]
-}));
+app.use(cors({ origin: "*" }));
 app.use(express.json());
 
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: ["http://localhost:5173", "https://tu-dominio-frontend.vercel.app"],
-    methods: ["GET", "POST"]
-  },
-  transports: ["polling", "websocket"]
-});
+const io = new Server(server, { cors: { origin: "*" } });
 
-(async () => await conectarDB())();
+let usuariosConectados = {}; // { socketId: nombre }
 
-let usuariosConectados = {};
-
-io.on("connection", async (socket) => {
+io.on("connection", (socket) => {
   console.log("Usuario conectado:", socket.id);
-
-  // Historial
-  const historial = await Mensaje.findAll({ order: [["fecha", "ASC"]] });
-  historial.forEach(m => socket.emit("mensaje", { usuario: m.de, texto: m.texto }));
 
   // Nuevo usuario
   socket.on("nuevoUsuario", (nombre) => {
     usuariosConectados[socket.id] = nombre;
     io.emit("mensaje", { usuario: "Sistema", texto: `⚡ ${nombre} se ha unido al chat` });
 
+    // Lista de usuarios
     const lista = Object.entries(usuariosConectados).map(([id, nombre]) => ({ id, nombre }));
     io.emit("usuariosConectados", lista);
   });
 
   // Mensajes
-  socket.on("mensaje", async (msg) => {
-    const nombre = msg.usuario;
-    await Mensaje.create({ de: nombre, texto: msg.texto });
-    io.emit("mensaje", { usuario: nombre, texto: msg.texto });
-  });
+  socket.on("mensaje", (msg) => io.emit("mensaje", msg));
 
-  // Llamadas
+  // Señalización WebRTC
   socket.on("llamada", ({ de, a }) => {
-    if (usuariosConectados[a]) io.to(a).emit("llamadaEntrante", { de });
+    if (usuariosConectados[a]) {
+      io.to(a).emit("llamadaEntrante", { de, nombre: usuariosConectados[de] });
+    }
   });
 
   socket.on("responderLlamada", ({ de, respuesta }) => {
-    io.to(de).emit("respuestaLlamada", { respuesta });
+    io.to(de).emit("respuestaLlamada", { respuesta, from: socket.id });
+  });
+
+  socket.on("ofertaLlamada", ({ to, offer }) => {
+    io.to(to).emit("ofertaLlamada", { from: socket.id, offer });
+  });
+
+  socket.on("respuestaWebRTC", ({ to, answer }) => {
+    io.to(to).emit("respuestaWebRTC", { from: socket.id, answer });
+  });
+
+  socket.on("iceCandidate", ({ to, candidate }) => {
+    io.to(to).emit("iceCandidate", { from: socket.id, candidate });
   });
 
   // Desconexión
   socket.on("disconnect", () => {
     const nombre = usuariosConectados[socket.id];
-    if (nombre) io.emit("mensaje", { usuario: "Sistema", texto: `❌ ${nombre} ha salido del chat` });
     delete usuariosConectados[socket.id];
+    io.emit("mensaje", { usuario: "Sistema", texto: `❌ ${nombre} ha salido del chat` });
 
     const lista = Object.entries(usuariosConectados).map(([id, nombre]) => ({ id, nombre }));
     io.emit("usuariosConectados", lista);
