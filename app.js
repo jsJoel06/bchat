@@ -12,11 +12,12 @@ app.use(express.json());
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
+// Guardar usuarios conectados: { socketId: userId }
 let usuariosConectados = {};
 
 conectarDB();
 
-// --- Registro / Login ---
+// ---------------- Registro / Login ----------------
 app.post("/registrar", async (req, res) => {
   const { nombre, password } = req.body;
   if (!nombre || !password) return res.status(400).json({ error: "Faltan datos" });
@@ -37,18 +38,22 @@ app.post("/registrar", async (req, res) => {
   }
 });
 
-// --- Socket.io ---
+// ---------------- Socket.io ----------------
 io.on("connection", (socket) => {
   console.log("Usuario conectado:", socket.id);
 
+  // Login con socket
   socket.on("loginUsuario", async ({ nombre, password }) => {
     try {
       let usuario = await Usuario.findOne({ where: { nombre } });
       if (!usuario) usuario = await Usuario.create({ nombre, password: password || "1234" });
+
       usuariosConectados[socket.id] = usuario.id;
 
+      // Avisar al chat
       io.emit("mensaje", { usuario: "Sistema", texto: `${usuario.nombre} se ha unido al chat` });
 
+      // Enviar lista de usuarios conectados
       const lista = await Promise.all(
         Object.entries(usuariosConectados).map(async ([id, userId]) => {
           const u = await Usuario.findByPk(userId);
@@ -57,6 +62,7 @@ io.on("connection", (socket) => {
       );
       io.emit("usuariosConectados", lista);
 
+      // Confirmar login al socket
       socket.emit("loginSuccess", { usuario: { id: usuario.id, nombre: usuario.nombre } });
     } catch (err) {
       console.error(err);
@@ -64,6 +70,7 @@ io.on("connection", (socket) => {
     }
   });
 
+  // Mensajes
   socket.on("mensaje", async (msg) => {
     try {
       await Mensaje.create({ de: msg.usuario, texto: msg.texto });
@@ -73,14 +80,44 @@ io.on("connection", (socket) => {
     }
   });
 
-  // --- Aquí van las funciones de llamadas WebRTC ---
-  // llamada, responderLlamada, ofertaLlamada, respuestaWebRTC, iceCandidate
+  // ---------------- Llamadas WebRTC ----------------
+  socket.on("ofertaLlamada", async ({ to, offer }) => {
+    try {
+      const socketIdDestino = Object.keys(usuariosConectados).find(id => usuariosConectados[id] === to);
+      if (socketIdDestino) {
+        const usuarioQueLlama = await Usuario.findByPk(usuariosConectados[socket.id]);
+        io.to(socketIdDestino).emit("llamadaEntrante", {
+          de: socket.id,
+          nombre: usuarioQueLlama.nombre,
+          offer,
+        });
+      }
+    } catch (err) {
+      console.error("Error en ofertaLlamada:", err);
+    }
+  });
 
+  socket.on("respuestaWebRTC", ({ to, answer }) => {
+    const socketIdDestino = Object.keys(usuariosConectados).find(id => usuariosConectados[id] === to);
+    if (socketIdDestino) {
+      io.to(socketIdDestino).emit("respuestaWebRTC", { answer });
+    }
+  });
+
+  socket.on("iceCandidate", ({ to, candidate }) => {
+    const socketIdDestino = Object.keys(usuariosConectados).find(id => usuariosConectados[id] === to);
+    if (socketIdDestino) {
+      io.to(socketIdDestino).emit("iceCandidate", { candidate });
+    }
+  });
+
+  // Desconexión
   socket.on("disconnect", async () => {
     const userId = usuariosConectados[socket.id];
     if (userId) {
       const u = await Usuario.findByPk(userId);
       delete usuariosConectados[socket.id];
+
       io.emit("mensaje", { usuario: "Sistema", texto: `${u.nombre} ha salido del chat` });
 
       const lista = await Promise.all(
@@ -94,5 +131,6 @@ io.on("connection", (socket) => {
   });
 });
 
+// ---------------- Servidor ----------------
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => console.log(`Servidor corriendo en puerto ${PORT}`));
