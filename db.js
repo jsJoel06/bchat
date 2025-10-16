@@ -1,4 +1,3 @@
-
 const { Sequelize, DataTypes } = require("sequelize");
 
 const DATABASE_URL =
@@ -24,10 +23,10 @@ const Mensaje = sequelize.define("Mensaje", {
   fecha: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
 });
 
-// Modelo de usuarios
+// Modelo de usuarios (sin password)
 const Usuario = sequelize.define("Usuario", {
   nombre: { type: DataTypes.STRING, allowNull: false, unique: true },
-  password: { type: DataTypes.STRING, allowNull: false, defaultValue: "1234" },
+  email: { type: DataTypes.STRING, allowNull: false, unique: true },
   fechaCreacion: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
 });
 
@@ -37,8 +36,7 @@ const conectarDB = async () => {
     await sequelize.authenticate();
     console.log("✅ PostgreSQL conectado");
 
-    // Sincronizar tablas
-    await sequelize.sync();
+    await sequelize.sync({ alter: true });
     console.log("✅ Tablas sincronizadas (Mensaje, Usuario)");
   } catch (err) {
     console.error("❌ Error al conectar DB:", err);
