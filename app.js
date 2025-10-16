@@ -28,7 +28,7 @@ let usuariosConectados = {};
 io.on("connection", async (socket) => {
   console.log("Usuario conectado:", socket.id);
 
-  // Enviar historial
+  // Historial
   const historial = await Mensaje.findAll({ order: [["fecha", "ASC"]] });
   historial.forEach(m => socket.emit("mensaje", { usuario: m.de, texto: m.texto }));
 
@@ -36,21 +36,21 @@ io.on("connection", async (socket) => {
   socket.on("nuevoUsuario", (nombre) => {
     usuariosConectados[socket.id] = nombre;
     io.emit("mensaje", { usuario: "Sistema", texto: `⚡ ${nombre} se ha unido al chat` });
+
+    const lista = Object.entries(usuariosConectados).map(([id, nombre]) => ({ id, nombre }));
+    io.emit("usuariosConectados", lista);
   });
 
   // Mensajes
   socket.on("mensaje", async (msg) => {
-    const nombre = msg.usuario; // siempre viene del frontend
+    const nombre = msg.usuario;
     await Mensaje.create({ de: nombre, texto: msg.texto });
     io.emit("mensaje", { usuario: nombre, texto: msg.texto });
   });
 
   // Llamadas
   socket.on("llamada", ({ de, a }) => {
-    // 'a' es socketId del usuario que recibe
-    if (usuariosConectados[a]) {
-      io.to(a).emit("llamadaEntrante", { de });
-    }
+    if (usuariosConectados[a]) io.to(a).emit("llamadaEntrante", { de });
   });
 
   socket.on("responderLlamada", ({ de, respuesta }) => {
@@ -62,6 +62,9 @@ io.on("connection", async (socket) => {
     const nombre = usuariosConectados[socket.id];
     if (nombre) io.emit("mensaje", { usuario: "Sistema", texto: `❌ ${nombre} ha salido del chat` });
     delete usuariosConectados[socket.id];
+
+    const lista = Object.entries(usuariosConectados).map(([id, nombre]) => ({ id, nombre }));
+    io.emit("usuariosConectados", lista);
   });
 });
 
