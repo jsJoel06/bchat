@@ -17,7 +17,7 @@ let usuariosConectados = {}; // { socketId: usuarioId }
 // Conectar a la base de datos
 conectarDB();
 
-// --- Endpoint para registrar usuario ---
+// --- Endpoint para registrar o iniciar sesión ---
 app.post("/registrar", async (req, res) => {
   const { email, nombre } = req.body;
   if (!email || !nombre)
@@ -25,16 +25,25 @@ app.post("/registrar", async (req, res) => {
 
   try {
     let usuario = await Usuario.findOne({ where: { email } });
-    if (usuario)
-      return res.status(400).json({ error: "El correo ya existe" });
 
-    usuario = await Usuario.create({ email, nombre });
-    res.json({
-      mensaje: "Usuario creado",
-      usuario: { id: usuario.id, email: usuario.email, nombre: usuario.nombre },
-    });
+    if (!usuario) {
+      // Si no existe, crear
+      usuario = await Usuario.create({ email, nombre });
+      console.log("✅ Usuario creado:", usuario.email);
+      res.json({
+        mensaje: "Usuario creado",
+        usuario: { id: usuario.id, email: usuario.email, nombre: usuario.nombre },
+      });
+    } else {
+      // Si ya existe, hacer login automático
+      console.log("🔑 Usuario existente:", usuario.email);
+      res.json({
+        mensaje: "Login exitoso",
+        usuario: { id: usuario.id, email: usuario.email, nombre: usuario.nombre },
+      });
+    }
   } catch (err) {
-    console.error("Error registrar usuario:", err);
+    console.error("❌ Error registrar/login usuario:", err);
     res.status(500).json({ error: "Error en el servidor" });
   }
 });
@@ -43,16 +52,15 @@ app.post("/registrar", async (req, res) => {
 io.on("connection", (socket) => {
   console.log("Usuario conectado:", socket.id);
 
-  // Login con email
-  socket.on("loginUsuario", async ({ email }) => {
+  // Login con email (crea si no existe)
+  socket.on("loginUsuario", async ({ email, nombre }) => {
     try {
-      const usuario = await Usuario.findOne({ where: { email } });
+      let usuario = await Usuario.findOne({ where: { email } });
 
+      // Si no existe, lo crea automáticamente
       if (!usuario) {
-        socket.emit("loginError", {
-          mensaje: "El correo no existe. Regístrate primero.",
-        });
-        return;
+        usuario = await Usuario.create({ email, nombre: nombre || "Usuario" });
+        console.log("👤 Usuario creado desde socket:", usuario.email);
       }
 
       usuariosConectados[socket.id] = usuario.id;
@@ -138,5 +146,5 @@ io.on("connection", (socket) => {
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () =>
-  console.log(`Servidor corriendo en puerto ${PORT}`)
+  console.log(`🚀 Servidor corriendo en puerto ${PORT}`)
 );
