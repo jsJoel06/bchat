@@ -11,11 +11,12 @@ app.use(express.json());
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-let usuariosConectados = {}; // { socketId: usuarioId }
+
+let usuariosConectados = {};
 
 conectarDB();
 
-// --- Registro / Login por nombre y password ---
+
 app.post("/registrar", async (req, res) => {
   const { nombre, password } = req.body;
   if (!nombre || !password)
@@ -23,7 +24,6 @@ app.post("/registrar", async (req, res) => {
 
   try {
     let usuario = await Usuario.findOne({ where: { nombre } });
-
     if (!usuario) {
       usuario = await Usuario.create({ nombre, password });
       console.log("✅ Usuario creado:", usuario.nombre);
@@ -51,15 +51,14 @@ app.post("/registrar", async (req, res) => {
 io.on("connection", (socket) => {
   console.log("Usuario conectado:", socket.id);
 
+  // Login por socket
   socket.on("loginUsuario", async ({ nombre, password }) => {
     try {
       let usuario = await Usuario.findOne({ where: { nombre } });
-
       if (!usuario) {
         usuario = await Usuario.create({ nombre, password: password || "1234" });
         console.log("👤 Usuario creado desde socket:", usuario.nombre);
       }
-
       usuariosConectados[socket.id] = usuario.id;
 
       io.emit("mensaje", {
@@ -82,7 +81,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Mensajes
+  // Chat
   socket.on("mensaje", async (msg) => {
     try {
       await Mensaje.create({ de: msg.usuario, texto: msg.texto });
@@ -90,6 +89,42 @@ io.on("connection", (socket) => {
     } catch (err) {
       console.error("Error mensaje:", err);
     }
+  });
+
+  // --- LLAMADAS WEBRTC ---
+  // Iniciar llamada
+  socket.on("llamada", ({ de, a }) => {
+    const socketDestino = Object.keys(usuariosConectados).find(
+      (id) => usuariosConectados[id] === a
+    );
+    if (socketDestino) {
+      io.to(socketDestino).emit("llamadaEntrante", { de, nombre: de });
+    }
+  });
+
+  // Responder llamada
+  socket.on("responderLlamada", ({ de, a, respuesta }) => {
+    const socketDestino = Object.keys(usuariosConectados).find(
+      (id) => usuariosConectados[id] === a
+    );
+    if (socketDestino) {
+      io.to(socketDestino).emit("respuestaLlamada", { respuesta });
+    }
+  });
+
+  // Oferta WebRTC
+  socket.on("ofertaLlamada", ({ to, offer }) => {
+    io.to(to).emit("ofertaLlamada", { from: socket.id, offer });
+  });
+
+  // Respuesta WebRTC
+  socket.on("respuestaWebRTC", ({ to, answer }) => {
+    io.to(to).emit("respuestaWebRTC", { answer });
+  });
+
+  // ICE candidates
+  socket.on("iceCandidate", ({ to, candidate }) => {
+    io.to(to).emit("iceCandidate", { candidate });
   });
 
   // Desconexión
