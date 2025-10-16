@@ -1,4 +1,3 @@
-// server.js
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -14,36 +13,36 @@ const io = new Server(server, { cors: { origin: "*" } });
 
 let usuariosConectados = {}; // { socketId: usuarioId }
 
-// Conectar a la base de datos
 conectarDB();
 
-// --- Endpoint para registrar o iniciar sesión ---
+// --- Registro / Login por nombre y password ---
 app.post("/registrar", async (req, res) => {
-  const { email, nombre } = req.body;
-  if (!email || !nombre)
-    return res.status(400).json({ error: "Falta nombre o correo" });
+  const { nombre, password } = req.body;
+  if (!nombre || !password)
+    return res.status(400).json({ error: "Faltan datos (nombre o password)" });
 
   try {
-    let usuario = await Usuario.findOne({ where: { email } });
+    let usuario = await Usuario.findOne({ where: { nombre } });
 
     if (!usuario) {
-      // Si no existe, crear
-      usuario = await Usuario.create({ email, nombre });
-      console.log("✅ Usuario creado:", usuario.email);
-      res.json({
+      usuario = await Usuario.create({ nombre, password });
+      console.log("✅ Usuario creado:", usuario.nombre);
+      return res.json({
         mensaje: "Usuario creado",
-        usuario: { id: usuario.id, email: usuario.email, nombre: usuario.nombre },
+        usuario: { id: usuario.id, nombre: usuario.nombre },
       });
     } else {
-      // Si ya existe, hacer login automático
-      console.log("🔑 Usuario existente:", usuario.email);
-      res.json({
+      if (usuario.password !== password) {
+        return res.status(401).json({ error: "Contraseña incorrecta" });
+      }
+      console.log("🔑 Login exitoso:", usuario.nombre);
+      return res.json({
         mensaje: "Login exitoso",
-        usuario: { id: usuario.id, email: usuario.email, nombre: usuario.nombre },
+        usuario: { id: usuario.id, nombre: usuario.nombre },
       });
     }
   } catch (err) {
-    console.error("❌ Error registrar/login usuario:", err);
+    console.error("❌ Error registro/login:", err);
     res.status(500).json({ error: "Error en el servidor" });
   }
 });
@@ -52,26 +51,22 @@ app.post("/registrar", async (req, res) => {
 io.on("connection", (socket) => {
   console.log("Usuario conectado:", socket.id);
 
-  // Login con email (crea si no existe)
-  socket.on("loginUsuario", async ({ email, nombre }) => {
+  socket.on("loginUsuario", async ({ nombre, password }) => {
     try {
-      let usuario = await Usuario.findOne({ where: { email } });
+      let usuario = await Usuario.findOne({ where: { nombre } });
 
-      // Si no existe, lo crea automáticamente
       if (!usuario) {
-        usuario = await Usuario.create({ email, nombre: nombre || "Usuario" });
-        console.log("👤 Usuario creado desde socket:", usuario.email);
+        usuario = await Usuario.create({ nombre, password: password || "1234" });
+        console.log("👤 Usuario creado desde socket:", usuario.nombre);
       }
 
       usuariosConectados[socket.id] = usuario.id;
 
-      // Notificación global
       io.emit("mensaje", {
         usuario: "Sistema",
         texto: `⚡ ${usuario.nombre} se ha unido al chat`,
       });
 
-      // Lista de usuarios conectados
       const lista = await Promise.all(
         Object.entries(usuariosConectados).map(async ([id, userId]) => {
           const u = await Usuario.findByPk(userId);
@@ -80,9 +75,7 @@ io.on("connection", (socket) => {
       );
       io.emit("usuariosConectados", lista);
 
-      socket.emit("loginSuccess", {
-        usuario: { id: usuario.id, email: usuario.email, nombre: usuario.nombre },
-      });
+      socket.emit("loginSuccess", { usuario: { id: usuario.id, nombre: usuario.nombre } });
     } catch (err) {
       console.error("Error login usuario:", err);
       socket.emit("loginError", { mensaje: "Error en el servidor" });
@@ -97,29 +90,6 @@ io.on("connection", (socket) => {
     } catch (err) {
       console.error("Error mensaje:", err);
     }
-  });
-
-  // WebRTC
-  socket.on("llamada", ({ de, a }) => {
-    if (usuariosConectados[a]) {
-      io.to(a).emit("llamadaEntrante", { de, nombre: de });
-    }
-  });
-
-  socket.on("responderLlamada", ({ de, respuesta }) => {
-    io.to(de).emit("respuestaLlamada", { respuesta, from: socket.id });
-  });
-
-  socket.on("ofertaLlamada", ({ to, offer }) => {
-    io.to(to).emit("ofertaLlamada", { from: socket.id, offer });
-  });
-
-  socket.on("respuestaWebRTC", ({ to, answer }) => {
-    io.to(to).emit("respuestaWebRTC", { from: socket.id, answer });
-  });
-
-  socket.on("iceCandidate", ({ to, candidate }) => {
-    io.to(to).emit("iceCandidate", { from: socket.id, candidate });
   });
 
   // Desconexión
@@ -145,6 +115,4 @@ io.on("connection", (socket) => {
 });
 
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () =>
-  console.log(`🚀 Servidor corriendo en puerto ${PORT}`)
-);
+server.listen(PORT, () => console.log(`🚀 Servidor corriendo en puerto ${PORT}`));
