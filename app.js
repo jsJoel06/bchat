@@ -1,3 +1,4 @@
+// server.js
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -11,12 +12,12 @@ app.use(express.json());
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-
+// Map de usuarios conectados: { socketId: usuarioId }
 let usuariosConectados = {};
 
 conectarDB();
 
-
+// --- Registro / Login ---
 app.post("/registrar", async (req, res) => {
   const { nombre, password } = req.body;
   if (!nombre || !password)
