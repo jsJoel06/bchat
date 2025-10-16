@@ -1,11 +1,20 @@
 const { Sequelize, DataTypes } = require("sequelize");
 
 // URL de conexión a PostgreSQL en Render
-const DATABASE_URL = process.env.DATABASE_URL || "postgresql://root:hlVC21CoVqKbBrq1mV6qxYFJkkZcsPGI@dpg-d3o851ripnbc73fp2rtg-a.oregon-postgres.render.com:5432/chat_db_tdov";
+const DATABASE_URL =
+  process.env.DATABASE_URL ||
+  "postgresql://root:hlVC21CoVqKbBrq1mV6qxYFJkkZcsPGI@dpg-d3o851ripnbc73fp2rtg-a.oregon-postgres.render.com:5432/chat_db_tdov";
 
+// Conexión con SSL para Render
 const sequelize = new Sequelize(DATABASE_URL, {
-  dialect: "postgres",
   logging: false,
+  dialect: "postgres",
+  dialectOptions: {
+    ssl: {
+      require: true,
+      rejectUnauthorized: false, // importante para Render
+    },
+  },
 });
 
 // Modelo de mensajes
