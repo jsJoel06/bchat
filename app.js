@@ -3,6 +3,7 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
+const { conectarDB, Mensaje, Usuario } = require("./db");
 
 const app = express();
 app.use(cors({ origin: "*" }));
@@ -11,28 +12,89 @@ app.use(express.json());
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-let usuariosConectados = {}; // { socketId: nombre }
+let usuariosConectados = {}; // { socketId: usuarioId }
 
+// Conectar a la base de datos
+conectarDB();
+
+// --- Endpoint para registrar usuario ---
+app.post("/registrar", async (req, res) => {
+  const { email, nombre } = req.body;
+  if (!email || !nombre)
+    return res.status(400).json({ error: "Falta nombre o correo" });
+
+  try {
+    let usuario = await Usuario.findOne({ where: { email } });
+    if (usuario)
+      return res.status(400).json({ error: "El correo ya existe" });
+
+    usuario = await Usuario.create({ email, nombre });
+    res.json({
+      mensaje: "Usuario creado",
+      usuario: { id: usuario.id, email: usuario.email, nombre: usuario.nombre },
+    });
+  } catch (err) {
+    console.error("Error registrar usuario:", err);
+    res.status(500).json({ error: "Error en el servidor" });
+  }
+});
+
+// --- Socket.io ---
 io.on("connection", (socket) => {
   console.log("Usuario conectado:", socket.id);
 
-  // Nuevo usuario
-  socket.on("nuevoUsuario", (nombre) => {
-    usuariosConectados[socket.id] = nombre;
-    io.emit("mensaje", { usuario: "Sistema", texto: `⚡ ${nombre} se ha unido al chat` });
+  // Login con email
+  socket.on("loginUsuario", async ({ email }) => {
+    try {
+      const usuario = await Usuario.findOne({ where: { email } });
 
-    // Lista de usuarios
-    const lista = Object.entries(usuariosConectados).map(([id, nombre]) => ({ id, nombre }));
-    io.emit("usuariosConectados", lista);
+      if (!usuario) {
+        socket.emit("loginError", {
+          mensaje: "El correo no existe. Regístrate primero.",
+        });
+        return;
+      }
+
+      usuariosConectados[socket.id] = usuario.id;
+
+      // Notificación global
+      io.emit("mensaje", {
+        usuario: "Sistema",
+        texto: `⚡ ${usuario.nombre} se ha unido al chat`,
+      });
+
+      // Lista de usuarios conectados
+      const lista = await Promise.all(
+        Object.entries(usuariosConectados).map(async ([id, userId]) => {
+          const u = await Usuario.findByPk(userId);
+          return { id, nombre: u.nombre };
+        })
+      );
+      io.emit("usuariosConectados", lista);
+
+      socket.emit("loginSuccess", {
+        usuario: { id: usuario.id, email: usuario.email, nombre: usuario.nombre },
+      });
+    } catch (err) {
+      console.error("Error login usuario:", err);
+      socket.emit("loginError", { mensaje: "Error en el servidor" });
+    }
   });
 
   // Mensajes
-  socket.on("mensaje", (msg) => io.emit("mensaje", msg));
+  socket.on("mensaje", async (msg) => {
+    try {
+      await Mensaje.create({ de: msg.usuario, texto: msg.texto });
+      io.emit("mensaje", msg);
+    } catch (err) {
+      console.error("Error mensaje:", err);
+    }
+  });
 
-  // Señalización WebRTC
+  // WebRTC
   socket.on("llamada", ({ de, a }) => {
     if (usuariosConectados[a]) {
-      io.to(a).emit("llamadaEntrante", { de, nombre: usuariosConectados[de] });
+      io.to(a).emit("llamadaEntrante", { de, nombre: de });
     }
   });
 
@@ -53,15 +115,28 @@ io.on("connection", (socket) => {
   });
 
   // Desconexión
-  socket.on("disconnect", () => {
-    const nombre = usuariosConectados[socket.id];
-    delete usuariosConectados[socket.id];
-    io.emit("mensaje", { usuario: "Sistema", texto: `❌ ${nombre} ha salido del chat` });
+  socket.on("disconnect", async () => {
+    const userId = usuariosConectados[socket.id];
+    if (userId) {
+      const u = await Usuario.findByPk(userId);
+      delete usuariosConectados[socket.id];
+      io.emit("mensaje", {
+        usuario: "Sistema",
+        texto: `❌ ${u.nombre} ha salido del chat`,
+      });
 
-    const lista = Object.entries(usuariosConectados).map(([id, nombre]) => ({ id, nombre }));
-    io.emit("usuariosConectados", lista);
+      const lista = await Promise.all(
+        Object.entries(usuariosConectados).map(async ([id, uid]) => {
+          const user = await Usuario.findByPk(uid);
+          return { id, nombre: user.nombre };
+        })
+      );
+      io.emit("usuariosConectados", lista);
+    }
   });
 });
 
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => console.log(`Servidor corriendo en puerto ${PORT}`));
+server.listen(PORT, () =>
+  console.log(`Servidor corriendo en puerto ${PORT}`)
+);
