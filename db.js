@@ -1,4 +1,3 @@
-// db.js
 const { Sequelize, DataTypes } = require("sequelize");
 
 // URL de conexión a PostgreSQL
@@ -6,7 +5,7 @@ const DATABASE_URL = "postgresql://root:hlVC21CoVqKbBrq1mV6qxYFJkkZcsPGI@dpg-d3o
 
 // Crear instancia de Sequelize
 const sequelize = new Sequelize(DATABASE_URL, {
-  logging: false, // desactiva logs de SQL
+  logging: false,
   dialect: "postgres",
 });
 
@@ -32,21 +31,10 @@ const conectarDB = async () => {
     await sequelize.authenticate();
     console.log("✅ PostgreSQL conectado");
     await sequelize.sync();
-
-    // Agregar mensajes iniciales si la tabla está vacía
-    const count = await Mensaje.count();
-    if (count === 0) {
-      await Mensaje.bulkCreate([
-        { de: "Sistema", texto: "Bienvenido al chat!" },
-        { de: "Sistema", texto: "Aquí puedes hablar con tus amigos." },
-      ]);
-      console.log("💬 Mensajes iniciales creados");
-    }
-
   } catch (error) {
     console.error("❌ Error al conectar DB:", error);
   }
 };
 
-// Exportar sequelize y modelo
+// Exportar
 module.exports = { sequelize, Mensaje, conectarDB };
